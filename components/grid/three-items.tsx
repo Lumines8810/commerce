@@ -43,11 +43,26 @@ function ThreeItemGridItem({
 
 export async function ThreeItemGrid() {
   // Collections that start with `hidden-*` are hidden from the search page.
-  const homepageItems = await getCollectionProducts({
+  let homepageItems = await getCollectionProducts({
     collection: 'hidden-homepage-featured-items'
   });
 
-  if (!homepageItems[0] || !homepageItems[1] || !homepageItems[2]) return null;
+  // コレクションから商品が取得できなかった場合は、一般的な商品を取得
+  if (homepageItems.length < 3) {
+    console.log('特定のコレクションから商品を取得できませんでした。一般商品を取得します。');
+    
+    const { getProducts } = await import('lib/shopify');
+    homepageItems = await getProducts({
+      sortKey: 'BEST_SELLING',
+      reverse: false,
+      query: ''
+    });
+  }
+
+  if (!homepageItems[0] || !homepageItems[1] || !homepageItems[2]) {
+    console.error('商品情報が取得できませんでした。');
+    return null;
+  }
 
   const [firstProduct, secondProduct, thirdProduct] = homepageItems;
 

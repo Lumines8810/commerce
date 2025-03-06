@@ -6,9 +6,9 @@ import {
 import { isShopifyError } from 'lib/type-guards';
 import { ensureStartsWith } from 'lib/utils';
 import {
-  revalidateTag,
+  unstable_cacheLife as cacheLife,
   unstable_cacheTag as cacheTag,
-  unstable_cacheLife as cacheLife
+  revalidateTag
 } from 'next/cache';
 import { cookies, headers } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
@@ -78,6 +78,10 @@ export async function shopifyFetch<T>({
   variables?: ExtractVariables<T>;
 }): Promise<{ status: number; body: T } | never> {
   try {
+    console.log(`Fetching from Shopify API: ${endpoint}`);
+    console.log(`Query: ${query.substring(0, 50)}...`);
+    console.log(`Variables: ${JSON.stringify(variables)}`);
+    
     const result = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -94,6 +98,7 @@ export async function shopifyFetch<T>({
     const body = await result.json();
 
     if (body.errors) {
+      console.error('Shopify API Error:', JSON.stringify(body.errors, null, 2));
       throw body.errors[0];
     }
 
@@ -102,6 +107,7 @@ export async function shopifyFetch<T>({
       body
     };
   } catch (e) {
+    console.error('Shopify Fetch Error:', JSON.stringify(e, null, 2));
     if (isShopifyError(e)) {
       throw {
         cause: e.cause?.toString() || 'unknown',
@@ -313,23 +319,35 @@ export async function getCollectionProducts({
   cacheTag(TAGS.collections, TAGS.products);
   cacheLife('days');
 
-  const res = await shopifyFetch<ShopifyCollectionProductsOperation>({
-    query: getCollectionProductsQuery,
-    variables: {
-      handle: collection,
-      reverse,
-      sortKey: sortKey === 'CREATED_AT' ? 'CREATED' : sortKey
-    }
-  });
+  console.log(`Fetching products for collection: ${collection}`);
+  
+  try {
+    const res = await shopifyFetch<ShopifyCollectionProductsOperation>({
+      query: getCollectionProductsQuery,
+      variables: {
+        handle: collection,
+        reverse,
+        sortKey: sortKey === 'CREATED_AT' ? 'CREATED' : sortKey
+      }
+    });
 
-  if (!res.body.data.collection) {
-    console.log(`No collection found for \`${collection}\``);
+    console.log(`API response for ${collection}:`, JSON.stringify(res.body, null, 2));
+
+    if (!res.body.data.collection) {
+      console.error(`No collection found for \`${collection}\``);
+      return [];
+    }
+
+    const products = reshapeProducts(
+      removeEdgesAndNodes(res.body.data.collection.products)
+    );
+    
+    console.log(`Found ${products.length} products for collection ${collection}`);
+    return products;
+  } catch (error) {
+    console.error(`Error fetching collection ${collection}:`, error);
     return [];
   }
-
-  return reshapeProducts(
-    removeEdgesAndNodes(res.body.data.collection.products)
-  );
 }
 
 export async function getCollections(): Promise<Collection[]> {
@@ -448,16 +466,28 @@ export async function getProducts({
   cacheTag(TAGS.products);
   cacheLife('days');
 
-  const res = await shopifyFetch<ShopifyProductsOperation>({
-    query: getProductsQuery,
-    variables: {
-      query,
-      reverse,
-      sortKey
-    }
-  });
+  console.log(`Fetching products with query: ${query || 'none'}`);
+  
+  try {
+    const res = await shopifyFetch<ShopifyProductsOperation>({
+      query: getProductsQuery,
+      variables: {
+        query,
+        reverse,
+        sortKey
+      }
+    });
 
-  return reshapeProducts(removeEdgesAndNodes(res.body.data.products));
+    console.log(`API products response:`, JSON.stringify(res.body, null, 2));
+
+    const products = reshapeProducts(removeEdgesAndNodes(res.body.data.products));
+    console.log(`Found ${products.length} products total`);
+    
+    return products;
+  } catch (error) {
+    console.error(`Error fetching products:`, error);
+    return [];
+  }
 }
 
 // This is called from `app/api/revalidate.ts` so providers can control revalidation logic.
